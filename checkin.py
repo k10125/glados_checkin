@@ -19,9 +19,12 @@ def start():
         mess = checkin.json()['message']
         time = state.json()['data']['leftDays']
         time = time.split('.')[0]
+        balance = checkin.json().get('list', [{}])[0].get('balance')
+        # 去除小数点后面的位数
+        balance = balance.split('.')[0]
         # print(time)
         if sever == 'on':
-            content = mess + '，you have ' + time + ' days left'
+            content = mess + '，you have ' + time + ' days left and ' + balance + ' points.'
             requests.get('https://sctapi.ftqq.com/' + sckey + '.send?title=glados自动签到&desp='+content)
     else:
         requests.get('https://sctapi.ftqq.com/' + sckey + '.send?title=glados自动签到&desp=cookie过期')
@@ -32,11 +35,5 @@ def main_handler(event, context):
 
 
 if __name__ == '__main__':
-    import time
-    import random
-    # 在正式请求前随机等待 1 到 600 秒 (10分钟内)
-    sleep_time = random.randint(1, 600)
-    print(f"随机等待 {sleep_time} 秒后再执行签到...")
-    time.sleep(sleep_time)
     start()
 
