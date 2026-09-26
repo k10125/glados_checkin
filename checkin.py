@@ -41,7 +41,7 @@ def api(session, method, path, **kwargs):
     label = str(code) if type(code) is int else "missing/non-integer"
     print(path + ": API code=" + label)
     message = str(payload.get("message", ""))
-    already = ("please try tomorrow", "already checked in", "already checked-in", "already checkin")
+    already = ("please try tomorrow", "already checked in", "already checked-in", "already checkin", "today's observation logged. return tomorrow for more points.")
     if path == "/api/user/checkin" and code == 1 and any(text in message.lower() for text in already):
         print("Already checked in today; no further action needed")
         payload["_already_checked_in"] = True
