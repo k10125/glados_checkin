@@ -1,39 +1,100 @@
-import requests, json, os
+"""GLaDOS check-in using credentials supplied only through environment variables."""
+import os
+import sys
+from decimal import Decimal, InvalidOperation
 
-# server酱开关，填off不开启(默认)，填on同时开启cookie失效通知和签到成功通知
-sever = os.getenv("SERVE", "on")
-# 填写server酱sckey,不开启server酱则不用填
-sckey = os.getenv("SCKEY", "SCT344150TXvYz8GLA511CDTWuQMX9hqD4")
-# 填入glados账号对应cookie
-cookie = os.getenv("COOKIE", "koa:sess=eyJ1c2VySWQiOjMxNDczNiwiX2V4cGlyZSI6MTc5NDY2Njg0NTMzNiwiX21heEFnZSI6MjU5MjAwMDAwMDB9; koa:sess.sig=vSNZgWI95DXAM-P67HiZacow0BE; __stripe_mid=209ed6d1-af7f-4073-81e0-a4b1e037533fa2e886; __stripe_sid=7eb0896f-0bce-4af7-b849-3c8bd445d30e1919f2")
+import requests
+
+BASE = "https://glados.cloud"
+
+
+class CheckinError(RuntimeError):
+    pass
+
+
+def number_text(value):
+    try:
+        return str(int(Decimal(str(value))))
+    except (InvalidOperation, ValueError, TypeError, OverflowError):
+        return "unknown"
+
+
+def api(session, method, path):
+    try:
+        response = session.request(method, BASE + path, timeout=30, allow_redirects=False)
+    except requests.RequestException:
+        raise CheckinError(path + ": network request failed (credentials omitted)") from None
+    print(path + ": HTTP " + str(response.status_code))
+    if response.status_code != 200:
+        raise CheckinError(path + ": unexpected HTTP status; check authentication or service availability")
+    try:
+        payload = response.json()
+    except ValueError:
+        raise CheckinError(path + ": response is not JSON") from None
+    if not isinstance(payload, dict):
+        raise CheckinError(path + ": expected a JSON object")
+    code = payload.get("code")
+    # Do not log arbitrary response bodies, account data, or credentials.
+    label = str(code) if type(code) is int else "missing/non-integer"
+    print(path + ": API code=" + label)
+    if type(code) is not int or code != 0:
+        raise CheckinError(path + ": API rejected request (code=" + label + "); verify the complete current Cookie")
+    return payload
+
+
+def notify(content):
+    if os.getenv("SERVE", "off").strip().lower() != "on":
+        return
+    key = os.getenv("SCKEY", "").strip()
+    if not key:
+        print("WARNING: notifications enabled but SCKEY is missing")
+        return
+    try:
+        response = requests.post("https://sctapi.ftqq.com/" + key + ".send",
+                                 data={"title": "GLaDOS check-in", "desp": content},
+                                 timeout=30, allow_redirects=False)
+        result = response.json()
+        if response.status_code != 200 or not isinstance(result, dict) or result.get("code") != 0:
+            print("WARNING: notification delivery failed; check SCKEY/provider")
+        else:
+            print("Notification delivered")
+    except (requests.RequestException, ValueError):
+        print("WARNING: notification request failed (credentials omitted)")
 
 
 def start():
-    url = "https://glados.cloud/api/user/checkin"
-    url2 = "https://glados.cloud/api/user/status"
-    referer = 'https://glados.cloud/console/checkin'
-    checkin = requests.post(url, headers={'cookie': cookie, 'referer': referer})
-    state = requests.get(url2, headers={'cookie': cookie, 'referer': referer})
-
-    if 'message' in checkin.text:
-        mess = checkin.json()['message']
-        time = state.json()['data']['leftDays']
-        time = time.split('.')[0]
-        balance = checkin.json().get('list', [{}])[0].get('balance')
-        # 去除小数点后面的位数
-        balance = balance.split('.')[0]
-        # print(time)
-        if sever == 'on':
-            content = mess + '，you have ' + time + ' days left and ' + balance + ' points.'
-            requests.get('https://sctapi.ftqq.com/' + sckey + '.send?title=glados自动签到&desp='+content)
-    else:
-        requests.get('https://sctapi.ftqq.com/' + sckey + '.send?title=glados自动签到&desp=cookie过期')
+    try:
+        cookie = os.getenv("COOKIE", "").strip()
+        if not cookie:
+            raise CheckinError("COOKIE Secret is missing or empty")
+        if cookie.lower().startswith("cookie:") or "\r" in cookie or "\n" in cookie:
+            raise CheckinError("COOKIE must be a single header value without the Cookie: prefix")
+        with requests.Session() as session:
+            session.headers.update({"Cookie": cookie, "Referer": BASE + "/console/checkin"})
+            # Confirm authentication before attempting a check-in.
+            state = api(session, "GET", "/api/user/status")
+            data = state.get("data")
+            if not isinstance(data, dict) or "leftDays" not in data:
+                raise CheckinError("Account status is missing data.leftDays; API response schema changed")
+            print("Authentication OK; account status contains data.leftDays")
+            result = api(session, "POST", "/api/user/checkin")
+            entries = result.get("list")
+            first = entries[0] if isinstance(entries, list) and entries else {}
+            balance = number_text(first.get("balance")) if isinstance(first, dict) else "unknown"
+            days = number_text(data["leftDays"])
+            content = "Check-in accepted; remaining days: " + days + "; points: " + balance
+            print(content)
+        notify(content)
+        return 0
+    except CheckinError as error:
+        print("ERROR: " + str(error))
+        notify("GLaDOS check-in failed: " + str(error))
+        return 1
 
 
 def main_handler(event, context):
     return start()
 
 
-if __name__ == '__main__':
-    start()
-
+if __name__ == "__main__":
+    sys.exit(start())
