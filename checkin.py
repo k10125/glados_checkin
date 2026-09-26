@@ -1,5 +1,6 @@
 """GLaDOS check-in using credentials supplied only through environment variables."""
 import os
+import re
 import sys
 from decimal import Decimal, InvalidOperation
 
@@ -39,9 +40,22 @@ def api(session, method, path, **kwargs):
     # Do not log arbitrary response bodies, account data, or credentials.
     label = str(code) if type(code) is int else "missing/non-integer"
     print(path + ": API code=" + label)
+    message = str(payload.get("message", ""))
+    already = ("please try tomorrow", "already checked in", "already checked-in", "already checkin")
+    if path == "/api/user/checkin" and code == 1 and any(text in message.lower() for text in already):
+        print("Already checked in today; no further action needed")
+        payload["_already_checked_in"] = True
+        return payload
     if code == 4 and payload.get("reason") == "device-mismatch":
         raise CheckinError(path + ": device-mismatch; USER_AGENT must match the browser used to obtain COOKIE")
     if type(code) is not int or code != 0:
+        # Redact credentials and identifier-like strings from short business error messages.
+        secrets = [os.getenv("COOKIE", ""), os.getenv("SCKEY", "")]
+        secrets += [part.partition("=")[2].strip() for part in os.getenv("COOKIE", "").split(";")]
+        for secret in sorted(filter(None, secrets), key=len, reverse=True):
+            message = message.replace(secret, "[redacted]")
+        message = re.sub(r"[A-Za-z0-9_@./+=:-]{20,}", "[redacted]", message)
+        print("API message: " + repr(message[:200]))
         raise CheckinError(path + ": API rejected request (code=" + label + "); verify the complete current Cookie")
     return payload
 
@@ -87,7 +101,8 @@ def start():
             first = entries[0] if isinstance(entries, list) and entries else {}
             balance = number_text(first.get("balance")) if isinstance(first, dict) else "unknown"
             days = number_text(data["leftDays"])
-            content = "Check-in accepted; remaining days: " + days + "; points: " + balance
+            outcome = "Already checked in today" if result.get("_already_checked_in") else "Check-in accepted"
+            content = outcome + "; remaining days: " + days + "; points: " + balance
             print(content)
         notify(content)
         return 0
