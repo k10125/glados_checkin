@@ -6,6 +6,8 @@ from decimal import Decimal, InvalidOperation
 import requests
 
 BASE = "https://glados.cloud"
+# Match the browser used to obtain COOKIE; override when renewing from another device.
+DEFAULT_USER_AGENT = "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Edg/153.0.0.0 Mobile Safari/537.36"
 
 
 class CheckinError(RuntimeError):
@@ -19,9 +21,9 @@ def number_text(value):
         return "unknown"
 
 
-def api(session, method, path):
+def api(session, method, path, **kwargs):
     try:
-        response = session.request(method, BASE + path, timeout=30, allow_redirects=False)
+        response = session.request(method, BASE + path, timeout=30, allow_redirects=False, **kwargs)
     except requests.RequestException:
         raise CheckinError(path + ": network request failed (credentials omitted)") from None
     print(path + ": HTTP " + str(response.status_code))
@@ -37,6 +39,8 @@ def api(session, method, path):
     # Do not log arbitrary response bodies, account data, or credentials.
     label = str(code) if type(code) is int else "missing/non-integer"
     print(path + ": API code=" + label)
+    if code == 4 and payload.get("reason") == "device-mismatch":
+        raise CheckinError(path + ": device-mismatch; USER_AGENT must match the browser used to obtain COOKIE")
     if type(code) is not int or code != 0:
         raise CheckinError(path + ": API rejected request (code=" + label + "); verify the complete current Cookie")
     return payload
@@ -70,14 +74,15 @@ def start():
         if cookie.lower().startswith("cookie:") or "\r" in cookie or "\n" in cookie:
             raise CheckinError("COOKIE must be a single header value without the Cookie: prefix")
         with requests.Session() as session:
-            session.headers.update({"Cookie": cookie, "Referer": BASE + "/console/checkin"})
+            session.headers.update({"Cookie": cookie, "Referer": BASE + "/console/checkin",
+                                    "User-Agent": os.getenv("USER_AGENT", DEFAULT_USER_AGENT)})
             # Confirm authentication before attempting a check-in.
             state = api(session, "GET", "/api/user/status")
             data = state.get("data")
             if not isinstance(data, dict) or "leftDays" not in data:
                 raise CheckinError("Account status is missing data.leftDays; API response schema changed")
             print("Authentication OK; account status contains data.leftDays")
-            result = api(session, "POST", "/api/user/checkin")
+            result = api(session, "POST", "/api/user/checkin", json={"token": "glados.cloud"})
             entries = result.get("list")
             first = entries[0] if isinstance(entries, list) and entries else {}
             balance = number_text(first.get("balance")) if isinstance(first, dict) else "unknown"
