@@ -30,4 +30,5 @@ jobs:
           SERVE: ${{ secrets.SERVE }}
           SCKEY: ${{ secrets.SCKEY }}
           COOKIE: ${{ secrets.COOKIE }}
+          USER_AGENT: ${{ vars.USER_AGENT }}
         run: python checkin.py

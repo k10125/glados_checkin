@@ -8,7 +8,7 @@ import requests
 
 BASE = "https://glados.cloud"
 # Match the browser used to obtain COOKIE; override when renewing from another device.
-DEFAULT_USER_AGENT = "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Edg/153.0.0.0 Mobile Safari/537.36"
+DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36 Edg/156.0.0.0"
 
 
 class CheckinError(RuntimeError):
@@ -89,7 +89,7 @@ def start():
             raise CheckinError("COOKIE must be a single header value without the Cookie: prefix")
         with requests.Session() as session:
             session.headers.update({"Cookie": cookie, "Referer": BASE + "/console/checkin",
-                                    "User-Agent": os.getenv("USER_AGENT", DEFAULT_USER_AGENT)})
+                                    "User-Agent": os.getenv("USER_AGENT") or DEFAULT_USER_AGENT})
             # Confirm authentication before attempting a check-in.
             state = api(session, "GET", "/api/user/status")
             data = state.get("data")
